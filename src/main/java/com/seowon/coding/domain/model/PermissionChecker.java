@@ -4,8 +4,39 @@ package com.seowon.coding.domain.model;
 import lombok.Builder;
 
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 class PermissionChecker {
+
+    public static boolean hasPermissionV2(
+            String userId,
+            String targetResource,
+            String targetAction,
+            List<User> users,
+            List<UserGroup> groups,
+            List<Policy> policies
+    ) {
+        // 해당 사용자가 리소스에 대한 권한이 있는지 체크해야함.
+        User user = users.stream()
+                .filter(u -> u.id.equals(userId))
+                .findFirst()
+                .orElse(null);
+
+        if (user == null) {
+            return false;
+        }
+
+        Set<String> userGroups = user.groupIds.stream()
+                .filter(ug -> groups.contains(ug))
+                .collect(Collectors.toSet());
+
+        if (userGroups.isEmpty()) {
+            return false;
+        }
+
+        return false;
+    }
 
     /**
      * TODO #7: 코드를 최적화하세요

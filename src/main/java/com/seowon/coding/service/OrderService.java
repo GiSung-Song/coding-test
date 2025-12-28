@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -64,7 +65,49 @@ public class OrderService {
         // * order 를 저장
         // * 각 Product 의 재고를 수정
         // * placeOrder 메소드의 시그니처는 변경하지 않은 채 구현하세요.
-        return null;
+
+        // Order 생성
+        Order order = Order.builder()
+                .customerName(customerName)
+                .customerEmail(customerEmail)
+                .status(Order.OrderStatus.PENDING)
+                .orderDate(LocalDateTime.now())
+                .build();
+
+        if (productIds.isEmpty() || quantities.isEmpty()) {
+            return orderRepository.save(order);
+        }
+
+        if (productIds.size() != quantities.size()) {
+            throw new IllegalArgumentException("Product and quantity not match");
+        }
+
+        for (int i = 0; i < productIds.size(); i++) {
+            int quantity = quantities.get(i);
+
+            Product product = productRepository.findById(productIds.get(i))
+                    .orElseThrow(() -> new IllegalArgumentException("Product not found"));
+
+            if (quantity <= 0) {
+                throw new IllegalArgumentException("quantity must be positive: " + quantity);
+            }
+
+            if (product.getStockQuantity() < quantity) {
+                throw new IllegalStateException("insufficient stock for product " + productIds.get(i));
+            }
+
+            OrderItem orderItem = OrderItem.builder()
+                    .product(product)
+                    .quantity(quantity)
+                    .price(product.getPrice())
+                    .build();
+
+            order.addItem(orderItem);
+
+            product.decreaseStock(quantity);
+        }
+
+        return orderRepository.save(order);
     }
 
     /**
@@ -88,10 +131,7 @@ public class OrderService {
                 .customerEmail(customerEmail)
                 .status(Order.OrderStatus.PENDING)
                 .orderDate(LocalDateTime.now())
-                .items(new ArrayList<>())
-                .totalAmount(BigDecimal.ZERO)
                 .build();
-
 
         BigDecimal subtotal = BigDecimal.ZERO;
         for (OrderProduct req : orderProducts) {
@@ -108,22 +148,18 @@ public class OrderService {
             }
 
             OrderItem item = OrderItem.builder()
-                    .order(order)
                     .product(product)
                     .quantity(qty)
                     .price(product.getPrice())
                     .build();
-            order.getItems().add(item);
+
+            order.addItem(item);
 
             product.decreaseStock(qty);
             subtotal = subtotal.add(product.getPrice().multiply(BigDecimal.valueOf(qty)));
         }
+        order.checkoutOrder(subtotal, couponCode);
 
-        BigDecimal shipping = subtotal.compareTo(new BigDecimal("100.00")) >= 0 ? BigDecimal.ZERO : new BigDecimal("5.00");
-        BigDecimal discount = (couponCode != null && couponCode.startsWith("SALE")) ? new BigDecimal("10.00") : BigDecimal.ZERO;
-
-        order.setTotalAmount(subtotal.add(shipping).subtract(discount));
-        order.setStatus(Order.OrderStatus.PROCESSING);
         return orderRepository.save(order);
     }
 
@@ -132,6 +168,13 @@ public class OrderService {
      * - 시나리오: 일괄 배송 처리 중 진행률을 저장하여 다른 사용자가 조회 가능해야 함.
      * - 리뷰 포인트: proxy 및 transaction 분리, 예외 전파/롤백 범위, 가독성 등
      * - 상식적인 수준에서 요구사항(기획)을 가정하며 최대한 상세히 작성하세요.
+     */
+
+    /**
+     * updateProgressRequiresNew 메서드 호출 시 동일 프록시이므로, REQUIRES_NEW로 트랜잭션이 분리되지 않을 수 있음
+     * 만약 분리된다면, jobId 필드가 unique라 bulkShipOrdersParent 해당 메서드 자체가 rollback 될 수 있음
+     * 확실한 트랜잭션 분리를 위해 다른 클래스에서 진행이 필요해 보임
+     * updateProgressRequiresNew 메서드의 성공 여부와 상관없이 항상 markCompleted 메서드가 실행됨.
      */
     @Transactional
     public void bulkShipOrdersParent(String jobId, List<Long> orderIds) {

@@ -54,4 +54,20 @@ public class Product {
         }
         stockQuantity += quantity;
     }
+
+    public void changePrice(double percentage, boolean includeTax, double taxRate) {
+        BigDecimal base = this.getPrice();
+
+        BigDecimal changed = base.add(base.multiply(BigDecimal.valueOf(percentage).divide(BigDecimal.valueOf(100))));
+
+        if (includeTax) {
+            // 세금 비율 파라미터로 받는다는 가정
+            double tax = (taxRate / 100) + 1;
+            changed = changed.multiply(BigDecimal.valueOf(tax));
+        }
+
+        BigDecimal newPrice = changed.setScale(2);
+
+        this.price = newPrice;
+    }
 }
